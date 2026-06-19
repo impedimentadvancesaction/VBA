@@ -4,7 +4,7 @@ Sub ImportTodayFilePreserveAll_PickNewest()
     Dim wbSrc As Workbook
     Dim wsSrc As Worksheet
     Dim wsDest As Worksheet
-    Dim todayUK1 As String, todayUK2 As String, todayUK3 As String
+    Dim todayUK1 As String, todayUK2 As String, todayUK3 As String, todayUK4 As String
     Dim bestFile As String
     Dim bestDate As Date
     Dim fiDate As Date
@@ -21,6 +21,7 @@ Sub ImportTodayFilePreserveAll_PickNewest()
     todayUK1 = Format(Date, "dd-mm-yyyy")
     todayUK2 = Format(Date, "ddmmyyyy")
     todayUK3 = Format(Date, "dd_mm_yyyy")
+    todayUK4 = Format(Date, "dd.mm.yyyy")
 
     extList = Array("*.xlsx", "*.xlsm", "*.xls", "*.csv") ' restrict extensions
 
@@ -36,7 +37,8 @@ Sub ImportTodayFilePreserveAll_PickNewest()
         Do While f <> ""
             If InStr(1, f, todayUK1, vbTextCompare) > 0 _
                Or InStr(1, f, todayUK2, vbTextCompare) > 0 _
-               Or InStr(1, f, todayUK3, vbTextCompare) > 0 Then
+               Or InStr(1, f, todayUK3, vbTextCompare) > 0 _
+               Or InStr(1, f, todayUK4, vbTextCompare) > 0 Then
 
                 fiDate = FileDateTime(folderPath & f)
                 If fiDate > bestDate Then
