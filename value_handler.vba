@@ -487,13 +487,21 @@ Private Function FindHeaderRow(ws As Worksheet) As Long
 End Function
 
 ' Find column number by header text (exact match) in the header row
-Private Function FindHeaderColumn(ws As Worksheet, headerText As String) As Long
+Private Function FindHeaderColumn(ws As Worksheet, headerText As Variant) As Long
     Dim hr As Long, c As Long, lastC As Long
+    Dim cellText As String, normCell As String, normHeader As String
+
     hr = FindHeaderRow(ws)
     If hr = 0 Then Exit Function
     lastC = ws.Cells(hr, ws.Columns.Count).End(xlToLeft).Column
+
+    ' Normalize headerText: coerce to string, replace CR/LF with single space and trim
+    normHeader = Trim(Replace(Replace(Replace(CStr(headerText), vbCrLf, " "), vbCr, " "), vbLf, " "))
+
     For c = 1 To lastC
-        If Trim(CStr(ws.Cells(hr, c).Value)) = headerText Then
+        cellText = CStr(ws.Cells(hr, c).Value)
+        normCell = Trim(Replace(Replace(Replace(cellText, vbCrLf, " "), vbCr, " "), vbLf, " "))
+        If StrComp(normCell, normHeader, vbTextCompare) = 0 Then
             FindHeaderColumn = c
             Exit Function
         End If
