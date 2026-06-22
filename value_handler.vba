@@ -495,17 +495,33 @@ Private Function FindHeaderColumn(ws As Worksheet, headerText As Variant) As Lon
     If hr = 0 Then Exit Function
     lastC = ws.Cells(hr, ws.Columns.Count).End(xlToLeft).Column
 
-    ' Normalize headerText: coerce to string, replace CR/LF with single space and trim
-    normHeader = Trim(Replace(Replace(Replace(CStr(headerText), vbCrLf, " "), vbCr, " "), vbLf, " "))
+    ' Normalise headerText: coerce to string, replace CR/LF with space, remove common invisible chars, collapse spaces, trim
+    normHeader = CStr(headerText)
+    normHeader = Replace(normHeader, vbCrLf, " ")
+    normHeader = Replace(normHeader, vbCr, " ")
+    normHeader = Replace(normHeader, vbLf, " ")
+    normHeader = Replace(normHeader, Chr(160), " ")   ' non-breaking space
+    normHeader = Replace(normHeader, vbTab, " ")
+    normHeader = Replace(normHeader, ChrW(&H200B), " ") ' zero-width space (if present)
+    normHeader = Application.WorksheetFunction.Trim(normHeader) ' collapses multiple spaces
+    normHeader = Trim(normHeader)
 
     For c = 1 To lastC
         cellText = CStr(ws.Cells(hr, c).Value)
-        normCell = Trim(Replace(Replace(Replace(cellText, vbCrLf, " "), vbCr, " "), vbLf, " "))
+        normCell = Replace(cellText, vbCrLf, " ")
+        normCell = Replace(normCell, vbCr, " ")
+        normCell = Replace(normCell, vbLf, " ")
+        normCell = Replace(normCell, Chr(160), " ")
+        normCell = Replace(normCell, vbTab, " ")
+        normCell = Replace(normCell, ChrW(&H200B), " ")
+        normCell = Application.WorksheetFunction.Trim(normCell)
+        normCell = Trim(normCell)
         If StrComp(normCell, normHeader, vbTextCompare) = 0 Then
             FindHeaderColumn = c
             Exit Function
         End If
     Next c
+
     FindHeaderColumn = 0
 End Function
 
