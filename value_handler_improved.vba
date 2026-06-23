@@ -281,14 +281,20 @@ Public Sub CreateReportsPerRef()
     ' scan-the-whole-sheet-per-Name loop and is the main speed-up.
     Set nameIdx = BuildNameRowIndex(wsData, srcMap(NAME_COL_INDEX), srcHeaderRow + 1, dataLastRow)
 
+    ' Collects each saved-report outcome so a single summary can be shown
+    ' once at the end, instead of one pop-up per report.
+    Dim summary As String
+    summary = ""
+
     '------------------------------------------------------------------
     ' Produce one report per Ref.
     '------------------------------------------------------------------
     For Each refKey In dictRefs.Keys
         Set refDict = dictRefs(refKey)        ' Name -> threshold date for this Ref
 
-        ' Reset the template from the backup for a clean starting point.
-        RestoreTemplate wsTemp, wsBackup
+        ' The template is already clean here: it is restored once before the
+        ' loop, and again after every Ref at NextRef, so this iteration is
+        ' already covered. No duplicate restore needed.
         pasteRow = firstDataRow
 
         '--------------------------------------------------------------
@@ -464,26 +470,32 @@ ContinueLoop1:
         outFile = savePath & "FUN_" & refKey & ".xlsx"
         SaveReport wsTemp, outFile
 
-        ' If several Names are present and some are short, save anyway but
-        ' list the ones that need re-doing.
+        ' Record the outcome for the end-of-run summary instead of showing a
+        ' pop-up for every saved report.
         If Not onlyOneName And namesToRedo.Count > 0 Then
-            Dim msg As String, rd As Date
-            msg = "Report saved as " & outFile & vbCrLf & _
-                  "The following Names have fewer than " & MIN_DAYS & " distinct days and need re-doing:" & vbCrLf
+            Dim rd As Date
+            summary = summary & "Report saved as " & outFile & vbCrLf & _
+                      "  The following Names have fewer than " & MIN_DAYS & " distinct days and need re-doing:" & vbCrLf
             For Each nameKey In namesToRedo.Keys
                 missing = namesToRedo(nameKey)
                 rd = AddBusinessDays(Date, missing)
-                msg = msg & "- " & nameKey & " needs " & missing & " more day(s). Suggested re-do date: " & Format(rd, MSG_DATE_FORMAT) & vbCrLf
+                summary = summary & "  - " & nameKey & " needs " & missing & " more day(s). Suggested re-do date: " & Format(rd, MSG_DATE_FORMAT) & vbCrLf
             Next nameKey
-            MsgBox msg, vbInformation, "Partial Data - Needs Re-do"
+            summary = summary & vbCrLf
         Else
-            MsgBox "Report saved: " & outFile, vbInformation, "Report Complete"
+            summary = summary & "Report saved: " & outFile & vbCrLf
         End If
 
 NextRef:
         ' Leave the template clean for the next Ref.
         RestoreTemplate wsTemp, wsBackup
     Next refKey
+
+    ' Single summary for the whole run, shown only after every report has
+    ' been processed (not once per saved report).
+    If Len(summary) > 0 Then
+        MsgBox summary, vbInformation, "Reports complete"
+    End If
 
 CleanExit:
     Application.CutCopyMode = False
