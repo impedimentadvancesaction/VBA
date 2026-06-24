@@ -454,7 +454,9 @@ ContinueLoop1:
         ' and suggest a re-do date.
         If onlyOneName And namesToRedo.Count > 0 Then
             Dim onlyName As String, redoDate As Date
-            onlyName = namesToRedo.Keys(0)
+            Dim redoKeys As Variant
+            redoKeys = namesToRedo.Keys      ' capture the array first (late-binding safe)
+            onlyName = redoKeys(0)
             missing = namesToRedo(onlyName)
             redoDate = AddBusinessDays(Date, missing)
             RestoreTemplate wsTemp, wsBackup   ' discard the rows we added
