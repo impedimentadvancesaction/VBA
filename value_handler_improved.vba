@@ -59,6 +59,23 @@ Private Const NAME_COL_INDEX As Long = 1   ' position 1 = the 2nd column ("Colum
 ' Date-column fallback.
 Private Const DATE_COL_INDEX As Long = 2   ' position 2 = the 3rd column ("ColumnName3")
 
+' How TEXT dates are written on each sheet (real Excel date cells are
+' read directly and are unaffected by this). Set each to match its sheet.
+'   DORDER_DMY = day/month/year  (UK, e.g. 31/12/2025)
+'   DORDER_MDY = month/day/year  (US, e.g. 12/31/2025)
+Private Const DORDER_DMY As Long = 1
+Private Const DORDER_MDY As Long = 2
+Private Const DATA_DATE_ORDER As Long = DORDER_MDY   ' Sheet1 = US mm/dd/yyyy
+Private Const REFS_DATE_ORDER As Long = DORDER_DMY   ' Sheet2 = UK dd/mm/yyyy
+
+' Number format applied to the Date column in the output report (Sheet3).
+' This is an Excel cell number-format string (not a VBA Format() code).
+Private Const OUTPUT_DATE_NUMFORMAT As String = "[$-en-US,1]mm/dd/yyyy"  ' US display
+
+' VBA Format() pattern used for dates shown inside message boxes
+' (e.g. suggested re-do dates). Plain pattern, no locale tag.
+Private Const MSG_DATE_FORMAT As String = "mm/dd/yyyy"
+
 ' The 7 columns to copy, in order. These arrays are filled in InitConfig.
 Private srcCols    As Variant  ' source header names on the data sheet
 Private dstCols    As Variant  ' destination header names on the template (same order)
@@ -240,17 +257,20 @@ Public Sub CreateReportsPerRef()
 
     '------------------------------------------------------------------
     ' Pre-flight date check.
-    ' Scan the Date column on the data sheet AND the Refs sheet for any
-    ' value that is not a valid UK date, and report them up front. This
-    ' means nothing is ever silently mis-parsed: you see exactly which
-    ' cells are wrong before any report is built.
+    ' Scan the Date column on the data sheet (US order) AND the Refs sheet
+    ' (UK order) for any value that is not a valid date in its sheet's
+    ' format, and report them up front. This means nothing is ever silently
+    ' mis-parsed: you see exactly which cells are wrong before any report
+    ' is built. (Real Excel date cells always pass - their format is just
+    ' display.)
     '------------------------------------------------------------------
     Dim dateReport As String, badCount As Long, resp As VbMsgBoxResult
     dateReport = ""
-    badCount = AuditDateColumn(wsData, srcMap(DATE_COL_INDEX), dateReport)
-    badCount = badCount + AuditDateColumn(wsRefs, colDate, dateReport)
+    badCount = AuditDateColumn(wsData, srcMap(DATE_COL_INDEX), DATA_DATE_ORDER, dateReport)
+    badCount = badCount + AuditDateColumn(wsRefs, colDate, REFS_DATE_ORDER, dateReport)
     If badCount > 0 Then
-        resp = MsgBox(badCount & " cell(s) are not a valid UK date (dd/mm/yyyy):" & vbCrLf & vbCrLf & _
+        resp = MsgBox(badCount & " cell(s) are not a valid date for their sheet" & vbCrLf & _
+                      "(Sheet1 expects US mm/dd/yyyy, Sheet2 expects UK dd/mm/yyyy):" & vbCrLf & vbCrLf & _
                       dateReport & vbCrLf & _
                       "Rows with a bad date will be skipped, and a bad threshold date keeps all rows." & vbCrLf & _
                       "Continue anyway?", vbExclamation + vbYesNo, "Date check")
@@ -261,14 +281,20 @@ Public Sub CreateReportsPerRef()
     ' scan-the-whole-sheet-per-Name loop and is the main speed-up.
     Set nameIdx = BuildNameRowIndex(wsData, srcMap(NAME_COL_INDEX), srcHeaderRow + 1, dataLastRow)
 
+    ' Collects each saved-report outcome so a single summary can be shown
+    ' once at the end, instead of one pop-up per report.
+    Dim summary As String
+    summary = ""
+
     '------------------------------------------------------------------
     ' Produce one report per Ref.
     '------------------------------------------------------------------
     For Each refKey In dictRefs.Keys
         Set refDict = dictRefs(refKey)        ' Name -> threshold date for this Ref
 
-        ' Reset the template from the backup for a clean starting point.
-        RestoreTemplate wsTemp, wsBackup
+        ' The template is already clean here: it is restored once before the
+        ' loop, and again after every Ref at NextRef, so this iteration is
+        ' already covered. No duplicate restore needed.
         pasteRow = firstDataRow
 
         '--------------------------------------------------------------
@@ -319,18 +345,19 @@ Public Sub CreateReportsPerRef()
             ' Skip rows with no Name.
             If Len(Trim(CStr(wsTemp.Cells(r, colNameOnTemp).Value))) = 0 Then GoTo ContinueLoop1
 
-            ' Parse the row date strictly as UK format, with no reliance on
-            ' the machine's regional settings. Unparseable -> skip the row
-            ' (these were already listed by the pre-flight date check).
-            If Not TryParseUKDate(wsTemp.Cells(r, colDateOnTemp).Value, rowDate) Then GoTo ContinueLoop1
+            ' Parse the row date. It was copied from the data sheet, so it
+            ' follows the data-sheet order (US) when stored as text; real
+            ' date cells are read directly. No reliance on regional settings.
+            ' Unparseable -> skip (already listed by the pre-flight check).
+            If Not TryParseDate(wsTemp.Cells(r, colDateOnTemp).Value, DATA_DATE_ORDER, rowDate) Then GoTo ContinueLoop1
 
             nameVal = Trim(CStr(wsTemp.Cells(r, colNameOnTemp).Value))
 
-            ' Threshold date for this Name (from the Refs sheet). If it is
-            ' missing or unparseable, treat it as a very early date so the
-            ' row is kept.
+            ' Threshold date for this Name (from the Refs sheet, UK order).
+            ' If it is missing or unparseable, treat it as a very early date
+            ' so the row is kept.
             If refDict.Exists(nameVal) Then
-                If Not TryParseUKDate(refDict(nameVal), threshold) Then
+                If Not TryParseDate(refDict(nameVal), REFS_DATE_ORDER, threshold) Then
                     threshold = DateSerial(1900, 1, 1)
                 End If
             Else
@@ -385,12 +412,13 @@ ContinueLoop1:
             Next j
             ' Write the Date column back as a real date value. The key holds
             ' the date as yyyy-mm-dd, so build it with DateSerial (no CDate,
-            ' no locale dependence) and display it in UK format.
+            ' no locale dependence) and display it with the configured
+            ' output number format (US for Sheet3).
             parts = Split(k, "|")
             If UBound(parts) >= 1 Then
                 iso = Split(parts(1), "-")
                 wsTemp.Cells(outRow, colDateOnTemp).Value = DateSerial(CLng(iso(0)), CLng(iso(1)), CLng(iso(2)))
-                wsTemp.Cells(outRow, colDateOnTemp).NumberFormat = "dd/mm/yyyy"
+                wsTemp.Cells(outRow, colDateOnTemp).NumberFormat = OUTPUT_DATE_NUMFORMAT
             End If
             outRow = outRow + 1
         Next k
@@ -426,12 +454,14 @@ ContinueLoop1:
         ' and suggest a re-do date.
         If onlyOneName And namesToRedo.Count > 0 Then
             Dim onlyName As String, redoDate As Date
-            onlyName = namesToRedo.Keys(0)
+            Dim redoKeys As Variant
+            redoKeys = namesToRedo.Keys      ' capture the array first (late-binding safe)
+            onlyName = redoKeys(0)
             missing = namesToRedo(onlyName)
             redoDate = AddBusinessDays(Date, missing)
             RestoreTemplate wsTemp, wsBackup   ' discard the rows we added
             MsgBox "Report for Ref '" & refKey & "' aborted. Name '" & onlyName & "' has only " & (MIN_DAYS - missing) & " distinct days." & vbCrLf & _
-                   "Suggested re-do date: " & Format(redoDate, "dd/mm/yyyy"), vbExclamation
+                   "Suggested re-do date: " & Format(redoDate, MSG_DATE_FORMAT), vbExclamation
             GoTo NextRef
         End If
 
@@ -442,26 +472,32 @@ ContinueLoop1:
         outFile = savePath & "FUN_" & refKey & ".xlsx"
         SaveReport wsTemp, outFile
 
-        ' If several Names are present and some are short, save anyway but
-        ' list the ones that need re-doing.
+        ' Record the outcome for the end-of-run summary instead of showing a
+        ' pop-up for every saved report.
         If Not onlyOneName And namesToRedo.Count > 0 Then
-            Dim msg As String, rd As Date
-            msg = "Report saved as " & outFile & vbCrLf & _
-                  "The following Names have fewer than " & MIN_DAYS & " distinct days and need re-doing:" & vbCrLf
+            Dim rd As Date
+            summary = summary & "Report saved as " & outFile & vbCrLf & _
+                      "  The following Names have fewer than " & MIN_DAYS & " distinct days and need re-doing:" & vbCrLf
             For Each nameKey In namesToRedo.Keys
                 missing = namesToRedo(nameKey)
                 rd = AddBusinessDays(Date, missing)
-                msg = msg & "- " & nameKey & " needs " & missing & " more day(s). Suggested re-do date: " & Format(rd, "dd/mm/yyyy") & vbCrLf
+                summary = summary & "  - " & nameKey & " needs " & missing & " more day(s). Suggested re-do date: " & Format(rd, MSG_DATE_FORMAT) & vbCrLf
             Next nameKey
-            MsgBox msg, vbInformation, "Partial Data - Needs Re-do"
+            summary = summary & vbCrLf
         Else
-            MsgBox "Report saved: " & outFile, vbInformation, "Report Complete"
+            summary = summary & "Report saved: " & outFile & vbCrLf
         End If
 
 NextRef:
         ' Leave the template clean for the next Ref.
         RestoreTemplate wsTemp, wsBackup
     Next refKey
+
+    ' Single summary for the whole run, shown only after every report has
+    ' been processed (not once per saved report).
+    If Len(summary) > 0 Then
+        MsgBox summary, vbInformation, "Reports complete"
+    End If
 
 CleanExit:
     Application.CutCopyMode = False
@@ -683,37 +719,43 @@ Private Function NzZero(v As Variant) As Double
 End Function
 
 
-' Parse a date as UK format (day/month/year) WITHOUT relying on the
-' machine's regional settings. Returns True and sets outDate on success;
-' returns False for blanks or anything that is not a valid UK date.
+' Parse a date WITHOUT relying on the machine's regional settings.
+' Returns True and sets outDate on success; False for blanks or anything
+' that is not a valid date in the requested order.
+'
+' order = DORDER_DMY -> UK order dd/mm/yyyy (used for the Refs sheet)
+' order = DORDER_MDY -> US order mm/dd/yyyy (used for the data sheet)
 '
 ' Accepts:
-'   * A genuine Excel date cell (stored as a serial) - used as-is, since
-'     a real date serial is locale-independent.
-'   * Text in d/m/y order with "/", "-" or "." separators, e.g.
-'     31/12/2025, 5-3-2025, 01.06.2025. 2-digit years follow Excel's
-'     convention (00-29 -> 2000-2029, 30-99 -> 1930-1999).
-' Any time component is dropped (dates are compared date-only).
+'   * A genuine Excel date cell (stored as a serial) - used as-is, since a
+'     real date serial is locale-independent; the display format does not
+'     matter, only text dates carry an order ambiguity.
+'   * Text with "/", "-" or "." separators, in the requested order.
+'     2-digit years follow Excel's convention (00-29 -> 2000-2029,
+'     30-99 -> 1930-1999). Any time component is dropped.
 '
-' Impossible dates such as 31/02/2025 are rejected, because the value is
-' rebuilt with DateSerial and then checked to confirm the day, month and
-' year survived unchanged.
-Private Function TryParseUKDate(ByVal v As Variant, ByRef outDate As Date) As Boolean
+' Impossible dates such as 31/02/2025 (UK) or 02/31/2025 (US) are
+' rejected: the value is rebuilt with DateSerial and then checked to
+' confirm the day, month and year survived unchanged.
+Private Function TryParseDate(ByVal v As Variant, ByVal order As Long, _
+                              ByRef outDate As Date) As Boolean
     Dim s As String
     Dim p() As String
     Dim d As Long, m As Long, y As Long
     Dim chk As Date
 
-    TryParseUKDate = False
+    TryParseDate = False
 
     ' A real date cell comes through as a Date variant - trust it directly.
+    ' This is the unambiguous case: the display format (US or UK) and the
+    ' 'order' argument are irrelevant for a genuine date serial.
     If VarType(v) = vbDate Then
         outDate = Int(CDate(v))            ' strip any time component
-        TryParseUKDate = True
+        TryParseDate = True
         Exit Function
     End If
 
-    ' Otherwise treat it as text and parse d/m/y explicitly.
+    ' Otherwise treat it as text and parse explicitly in the given order.
     s = Trim(CStr(v))
     If Len(s) = 0 Then Exit Function
 
@@ -721,11 +763,15 @@ Private Function TryParseUKDate(ByVal v As Variant, ByRef outDate As Date) As Bo
     s = Replace(s, ".", "/")
     s = Replace(s, " ", "")                ' drop stray spaces
     p = Split(s, "/")
-    If UBound(p) <> 2 Then Exit Function   ' need exactly day, month, year
+    If UBound(p) <> 2 Then Exit Function   ' need exactly three components (year last)
 
     If Not (IsNumeric(p(0)) And IsNumeric(p(1)) And IsNumeric(p(2))) Then Exit Function
-    d = CLng(p(0))
-    m = CLng(p(1))
+
+    If order = DORDER_DMY Then
+        d = CLng(p(0)): m = CLng(p(1))     ' UK: day / month / year
+    Else
+        m = CLng(p(0)): d = CLng(p(1))     ' US: month / day / year
+    End If
     y = CLng(p(2))
 
     ' Expand 2-digit years (Excel convention).
@@ -738,19 +784,22 @@ Private Function TryParseUKDate(ByVal v As Variant, ByRef outDate As Date) As Bo
     If d < 1 Or d > 31 Then Exit Function
     If y < 1900 Or y > 9999 Then Exit Function
 
-    ' Build and verify the round-trip to reject impossible dates.
+    ' Build and verify the round-trip to reject impossible dates. This also
+    ' catches text that contradicts the configured order (e.g. 13/04/2025
+    ' in a US column -> month 13 -> rejected rather than silently swapped).
     chk = DateSerial(y, m, d)
     If Day(chk) <> d Or Month(chk) <> m Or Year(chk) <> y Then Exit Function
 
     outDate = chk
-    TryParseUKDate = True
+    TryParseDate = True
 End Function
 
 
-' Scan one sheet's date column for values that are not valid UK dates.
-' Appends up to 15 "Sheet!cell = 'value'" lines to 'report' and returns
-' the total count of problems found.
-Private Function AuditDateColumn(ws As Worksheet, dateCol As Long, ByRef report As String) As Long
+' Scan one sheet's date column for values that are not valid dates in the
+' given order (DORDER_DMY for UK, DORDER_MDY for US). Appends up to 15
+' "Sheet!cell = 'value'" lines to 'report' and returns the problem count.
+Private Function AuditDateColumn(ws As Worksheet, dateCol As Long, _
+                                 ByVal order As Long, ByRef report As String) As Long
     Dim hdr As Long, firstRow As Long, lastRow As Long, r As Long
     Dim count As Long
     Dim v As Variant, d As Date
@@ -764,7 +813,7 @@ Private Function AuditDateColumn(ws As Worksheet, dateCol As Long, ByRef report 
     For r = firstRow To lastRow
         v = ws.Cells(r, dateCol).Value
         If Len(Trim(CStr(v))) > 0 Then        ' ignore blank cells
-            If Not TryParseUKDate(v, d) Then
+            If Not TryParseDate(v, order, d) Then
                 count = count + 1
                 If count <= MAX_LIST Then
                     report = report & "  " & ws.Name & "!" & _
