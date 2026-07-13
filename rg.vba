@@ -1,4 +1,3 @@
-Attribute VB_Name = "mod_ReportGenerator"
 Option Explicit
 
 '==============================================================================
@@ -91,7 +90,12 @@ Private Const RTYPE4 As String = "ReportType4"
 Private Type TypeCfg
     IsValid As Boolean
     WorkdayOffset As Long    ' working days (Mon-Fri) added to today for the A16 date
-    A1Prefix As String       ' A1 = A1Prefix & " (" & <unique value> & ")"
+    A1Text1 As String        ' A1 always starts: A1Text1 & <Sheet2 ColName5 value>
+    A1Text2Single As String  ' if ONE unique Sheet5 S5_C2 value:  & A1Text2Single & <unique value> & A1Text3Single
+    A1Text3Single As String
+    A1Text2Multi As String   ' if MULTIPLE unique S5_C2 values:   & A1Text2Multi
+    '                          ...then " (" & <report ref> & ")" is appended in both cases.
+    '                          Include any leading/trailing SPACES inside these strings.
     A4Line2 As String        ' second line of cell A4
     A28A34Prefix As String   ' A28 / A34 = prefix & <unique value>
     S5C5Literal As String    ' constant written down Sheet5 column S5_C5
@@ -106,28 +110,40 @@ Private Function GetTypeConfig(ByVal typeName As String) As TypeCfg
     Select Case UCase$(Trim$(typeName))
         Case UCase$(RTYPE1)
             c.WorkdayOffset = 2
-            c.A1Prefix = "VALUE"
+            c.A1Text1 = "TEXT1 "
+            c.A1Text2Single = " TEXT2 "
+            c.A1Text3Single = " TEXT3"
+            c.A1Text2Multi = " TEXT2"
             c.A4Line2 = "VALUE2"
             c.A28A34Prefix = "VALUE"
             c.S5C5Literal = "VALUE"
             c.S5FilePrefix = "VALUE"
         Case UCase$(RTYPE2)
             c.WorkdayOffset = 1
-            c.A1Prefix = "VALUE"
+            c.A1Text1 = "TEXT1 "
+            c.A1Text2Single = " TEXT2 "
+            c.A1Text3Single = " TEXT3"
+            c.A1Text2Multi = " TEXT2"
             c.A4Line2 = "VALUE2"
             c.A28A34Prefix = "VALUE"
             c.S5C5Literal = "VALUE"
             c.S5FilePrefix = "VALUE"
         Case UCase$(RTYPE3)
             c.WorkdayOffset = 1
-            c.A1Prefix = "VALUE"
+            c.A1Text1 = "TEXT1 "
+            c.A1Text2Single = " TEXT2 "
+            c.A1Text3Single = " TEXT3"
+            c.A1Text2Multi = " TEXT2"
             c.A4Line2 = "VALUE2"
             c.A28A34Prefix = "VALUE"
             c.S5C5Literal = "VALUE"
             c.S5FilePrefix = "VALUE"
         Case UCase$(RTYPE4)
             c.WorkdayOffset = 1
-            c.A1Prefix = "VALUE"
+            c.A1Text1 = "TEXT1 "
+            c.A1Text2Single = " TEXT2 "
+            c.A1Text3Single = " TEXT3"
+            c.A1Text2Multi = " TEXT2"
             c.A4Line2 = "VALUE2"
             c.A28A34Prefix = "VALUE"
             c.S5C5Literal = "VALUE"
@@ -325,8 +341,27 @@ Private Function BuildOneReport(ByVal x As String, grpRows As Collection, _
     dateText = FormatUKDate(repDate)
 
     ' ==================== OUTPUT 1: Report Template 1 =========================
-    Dim a1Text As String
-    a1Text = cfg.A1Prefix & " (" & x & ")"
+    ' A1 depends on how many UNIQUE values will appear in Sheet5 column S5_C2
+    ' (i.e. the S3_RET1 lookup results for this group's rows).
+    Dim uniqC2 As Object
+    Set uniqC2 = CreateObject("Scripting.Dictionary")
+    uniqC2.CompareMode = vbTextCompare
+    For i = 1 To n
+        k = Trim$(CStr(a3(s3r(i), m3(S3_RET1))))
+        If Not uniqC2.Exists(k) Then uniqC2.Add k, True
+    Next i
+
+    Dim col5Val As String, a1Text As String
+    col5Val = Trim$(CStr(a2(s2r(1), m2(S2_COL5))))    ' taken from the group's first row
+
+    If uniqC2.Count = 1 Then
+        Dim c2Keys As Variant
+        c2Keys = uniqC2.Keys                          ' assign to Variant array before indexing
+        a1Text = cfg.A1Text1 & col5Val & cfg.A1Text2Single & c2Keys(0) & _
+                 cfg.A1Text3Single & " (" & x & ")"
+    Else
+        a1Text = cfg.A1Text1 & col5Val & cfg.A1Text2Multi & " (" & x & ")"
+    End If
 
     ThisWorkbook.Worksheets(SH_TPL1).Copy       ' new single-sheet workbook
     Set wbOut = ActiveWorkbook
